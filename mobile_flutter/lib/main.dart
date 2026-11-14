@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -368,6 +369,11 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
   final TransformationController _transCtrl = TransformationController();
   bool _isZoomed = false;
 
+  // Floating Controls Dock State (Draggable, Collapsible & Glassmorphism)
+  bool _controlsCollapsed = false;
+  Offset? _dockOffset;
+  bool _isDragLocked = false;
+
   // Virtual cursor position
   Offset? _virtualCursorPos;
   int _lastMouseMoveTime = 0;
@@ -393,6 +399,7 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
     setState(() {
       _isLandscape = !_isLandscape;
       _virtualCursorPos = null;
+      _dockOffset = null; // Reset dock position on rotation to keep in bounds
       if (_isLandscape) {
         SystemChrome.setPreferredOrientations([
           DeviceOrientation.landscapeLeft,
@@ -525,6 +532,19 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
     });
   }
 
+  void _toggleDragLock() {
+    setState(() {
+      _isDragLocked = !_isDragLocked;
+    });
+    if (_isDragLocked) {
+      _sendInput({'type': 'mouse_button', 'button': 'left', 'action': 'down'});
+      _showToast('✊ Đang giữ chuột trái (Kéo thả / Chọn vùng)');
+    } else {
+      _sendInput({'type': 'mouse_button', 'button': 'left', 'action': 'up'});
+      _showToast('Đã thả chuột trái');
+    }
+  }
+
   void _handleDirectTouch(Offset localPos, Size containerSize, String action) {
     final imageRect = _getRenderedImageRect(containerSize);
     final relX = (localPos.dx - imageRect.left) / imageRect.width;
@@ -611,8 +631,24 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
               ),
               const SizedBox(height: 10),
 
-              // Clipboard Section
-              const Text('📋 Đồng bộ Khay nhớ tạm (Clipboard)', style: TextStyle(color: Colors.cyanAccent, fontSize: 13, fontWeight: FontWeight.w600)),
+              // Remote File Explorer & Clipboard Section
+              const Text('📂 Tệp tin & Khay nhớ tạm', style: TextStyle(color: Colors.cyanAccent, fontSize: 13, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2C3E5F), foregroundColor: Colors.white),
+                      icon: const Icon(Icons.folder_shared, size: 18, color: Colors.amberAccent),
+                      label: const Text('Quản lý File PC'),
+                      onPressed: () {
+                        Navigator.pop(ctx);
+                        _showFileManager();
+                      },
+                    ),
+                  ),
+                ],
+              ),
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -620,7 +656,7 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF23304A), foregroundColor: Colors.white),
                       icon: const Icon(Icons.download, size: 18),
-                      label: const Text('Lấy từ PC'),
+                      label: const Text('Lấy Clipboard'),
                       onPressed: () {
                         Navigator.pop(ctx);
                         _getClipboardFromPC();
@@ -632,7 +668,7 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF23304A), foregroundColor: Colors.white),
                       icon: const Icon(Icons.upload, size: 18),
-                      label: const Text('Gửi tới PC'),
+                      label: const Text('Gửi Clipboard'),
                       onPressed: () {
                         Navigator.pop(ctx);
                         _syncClipboardToPC();
@@ -780,6 +816,9 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
 
   @override
   void dispose() {
+    if (_isDragLocked) {
+      _sendInput({'type': 'mouse_button', 'button': 'left', 'action': 'up'});
+    }
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.portraitUp,
       DeviceOrientation.portraitDown,
@@ -843,10 +882,16 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
                     Positioned.fill(
                       child: GestureDetector(
                         behavior: HitTestBehavior.translucent,
-                        onPanUpdate: (details) {
-                          if (_mode == 'trackpad') {
-                            final newX = (_virtualCursorPos!.dx + details.delta.dx * 1.3).clamp(imageRect.left, imageRect.right);
-                            final newY = (_virtualCursorPos!.dy + details.delta.dy * 1.3).clamp(imageRect.top, imageRect.bottom);
+                        onScaleUpdate: (details) {
+                          if (details.pointerCount >= 2) {
+                            // Two-finger scroll (laptop trackpad style)
+                            final dy = details.focalPointDelta.dy;
+                            if (dy.abs() > 1.0) {
+                              _sendInput({'type': 'mouse_wheel', 'delta_y': (dy * 6).round()});
+                            }
+                          } else if (_mode == 'trackpad') {
+                            final newX = (_virtualCursorPos!.dx + details.focalPointDelta.dx * 1.3).clamp(imageRect.left, imageRect.right);
+                            final newY = (_virtualCursorPos!.dy + details.focalPointDelta.dy * 1.3).clamp(imageRect.top, imageRect.bottom);
                             setState(() {
                               _virtualCursorPos = Offset(newX, newY);
                             });
@@ -854,10 +899,10 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
                             final normY = (newY - imageRect.top) / imageRect.height;
                             _throttledMouseMove(normX, normY);
                           } else {
-                            _handleDirectTouch(details.localPosition, containerSize, '');
+                            _handleDirectTouch(details.localFocalPoint, containerSize, '');
                           }
                         },
-                        onPanEnd: (_) {
+                        onScaleEnd: (_) {
                           if (_mode == 'trackpad' && _virtualCursorPos != null) {
                             final normX = (_virtualCursorPos!.dx - imageRect.left) / imageRect.width;
                             final normY = (_virtualCursorPos!.dy - imageRect.top) / imageRect.height;
@@ -901,69 +946,49 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
             ),
           ),
 
-          // Top Status & Mode Indicator Badge
+          // Top Status & Mode Indicator Badge (Compact & Tap to Toggle)
           Positioned(
-            top: 16,
-            left: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: const Color(0xCC1A1F2C),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white24),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _connected ? Colors.greenAccent : Colors.orangeAccent,
+            top: 14,
+            left: 14,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () => setState(() => _mode = _mode == 'trackpad' ? 'touch' : 'trackpad'),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xCC141924),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 7,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _connected ? Colors.greenAccent : Colors.orangeAccent,
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    _mode == 'trackpad' ? '🖱️ Trackpad' : '👆 Chạm trực tiếp',
-                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                  ),
-                ],
+                    const SizedBox(width: 5),
+                    Text(
+                      _mode == 'trackpad' ? '🖱️ Trackpad' : '👆 Chạm',
+                      style: const TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
 
-          // Bottom Trackpad Helper Buttons
-          Positioned(
-            bottom: 16,
-            left: 16,
-            right: 16,
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _buildMouseBtn('🖱️ Trái', () => _sendMouseClick('left', 'click')),
-                  const SizedBox(width: 6),
-                  _buildMouseBtn('⚡ Đúp', () => _sendMouseClick('left', 'dblclick')),
-                  const SizedBox(width: 6),
-                  _buildMouseBtn('🖱️ Phải', () => _sendMouseClick('right', 'click')),
-                  const SizedBox(width: 6),
-                  _buildMouseBtn('🔼 Cuộn', () => _sendInput({'type': 'mouse_wheel', 'delta_y': 240})),
-                  const SizedBox(width: 6),
-                  _buildMouseBtn('🔽 Cuộn', () => _sendInput({'type': 'mouse_wheel', 'delta_y': -240})),
-                  const SizedBox(width: 6),
-                  _buildMouseBtn('📋 Dán', _syncClipboardToPC),
-                  const SizedBox(width: 6),
-                  _buildMouseBtn('📁 Files', _showFileManager),
-                ],
-              ),
-            ),
-          ),
+          // Sleek Floating Control Dock (Draggable, Collapsible & Glassmorphism)
+          _buildFloatingControlDock(MediaQuery.of(context).size),
 
           // Top Floating Action Toolbar
           Positioned(
-            top: 16,
-            right: 16,
+            top: 14,
+            right: 14,
             child: Row(
               children: [
                 _buildToolIcon(
@@ -972,24 +997,26 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
                   tooltip: _isZoomed ? 'Về 1x' : 'Thu phóng 2x',
                   color: _isZoomed ? Colors.amberAccent : Colors.white,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 _buildToolIcon(
                   _isLandscape ? Icons.stay_current_portrait : Icons.screen_rotation,
                   _toggleOrientation,
                   tooltip: _isLandscape ? 'Chuyển màn hình dọc' : 'Xoay ngang màn hình (Cực rõ)',
                   color: _isLandscape ? Colors.greenAccent : Colors.white,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 _buildToolIcon(
                   _mode == 'trackpad' ? Icons.touch_app : Icons.mouse,
                   () => setState(() => _mode = _mode == 'trackpad' ? 'touch' : 'trackpad'),
                   tooltip: _mode == 'trackpad' ? 'Đang bật: Trackpad' : 'Đang bật: Chạm trực tiếp',
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 _buildToolIcon(Icons.keyboard, () => setState(() => _showKeyboard = !_showKeyboard), tooltip: 'Bàn phím ảo'),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
+                _buildToolIcon(Icons.folder_open, _showFileManager, tooltip: 'Quản lý File PC', color: Colors.amberAccent),
+                const SizedBox(width: 6),
                 _buildToolIcon(Icons.flash_on, _showSystemMenu, tooltip: 'Menu Hệ thống Windows & Nguồn', color: Colors.cyanAccent),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 _buildToolIcon(Icons.close, () => Navigator.pop(context), color: Colors.redAccent, tooltip: 'Ngắt kết nối'),
               ],
             ),
@@ -1116,17 +1143,221 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
     });
   }
 
-  Widget _buildMouseBtn(String text, VoidCallback onPressed) {
-    return ElevatedButton(
-      style: ElevatedButton.styleFrom(
-        backgroundColor: const Color(0xCC1A1F2C),
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        minimumSize: Size.zero,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+  Widget _buildFloatingControlDock(Size screenSize) {
+    // Dock size calculations
+    final double dockWidth = _controlsCollapsed ? 48.0 : 360.0;
+    final double dockHeight = _controlsCollapsed ? 48.0 : 46.0;
+
+    final double defaultY = screenSize.height - (_controlsCollapsed ? 65.0 : 70.0);
+    final double defaultX = 16.0;
+
+    final double maxPosX = (screenSize.width - dockWidth).clamp(8.0, double.infinity);
+    final double maxPosY = (screenSize.height - dockHeight - 10.0).clamp(10.0, double.infinity);
+
+    final double posX = (_dockOffset?.dx ?? defaultX).clamp(8.0, maxPosX);
+    final double posY = (_dockOffset?.dy ?? defaultY).clamp(20.0, maxPosY);
+
+    return Positioned(
+      left: posX,
+      top: posY,
+      child: GestureDetector(
+        onPanUpdate: (details) {
+          setState(() {
+            _dockOffset = Offset(
+              (posX + details.delta.dx).clamp(8.0, maxPosX),
+              (posY + details.delta.dy).clamp(20.0, maxPosY),
+            );
+          });
+        },
+        child: _controlsCollapsed
+            ? _buildCollapsedBubble()
+            : _buildExpandedDock(),
       ),
-      onPressed: onPressed,
-      child: Text(text, style: const TextStyle(fontSize: 12)),
+    );
+  }
+
+  Widget _buildCollapsedBubble() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: const Color(0xD9101624),
+            shape: BoxShape.circle,
+            border: Border.all(color: const Color(0x9900E5FF), width: 1.5),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x66000000),
+                blurRadius: 8,
+                offset: Offset(0, 3),
+              ),
+            ],
+          ),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(22),
+            onTap: () => setState(() => _controlsCollapsed = false),
+            child: const Center(
+              child: Icon(Icons.mouse, color: Colors.cyanAccent, size: 20),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildExpandedDock() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0xEB101624),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: const Color(0x26FFFFFF), width: 1),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x80000000),
+                blurRadius: 14,
+                offset: Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Drag handle
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 3),
+                child: Icon(Icons.drag_indicator, color: Colors.white38, size: 16),
+              ),
+              const SizedBox(width: 3),
+
+              // Chuột Trái (Left Click)
+              _buildDockBtn(
+                label: 'Trái',
+                icon: Icons.mouse,
+                color: Colors.white,
+                onTap: () => _sendMouseClick('left', 'click'),
+              ),
+              const SizedBox(width: 4),
+
+              // Nhấp Đúp (Double Click)
+              _buildDockBtn(
+                label: '2x Đúp',
+                icon: Icons.bolt,
+                color: Colors.amberAccent,
+                onTap: () => _sendMouseClick('left', 'dblclick'),
+              ),
+              const SizedBox(width: 4),
+
+              // Chuột Phải (Right Click)
+              _buildDockBtn(
+                label: 'Phải',
+                icon: Icons.ads_click,
+                color: Colors.cyanAccent,
+                onTap: () => _sendMouseClick('right', 'click'),
+              ),
+              const SizedBox(width: 4),
+
+              // Drag Lock (Giữ chuột để kéo thả / chọn văn bản)
+              _buildDockBtn(
+                label: _isDragLocked ? 'Đang kéo' : 'Kéo',
+                icon: _isDragLocked ? Icons.pan_tool : Icons.pan_tool_outlined,
+                color: _isDragLocked ? Colors.orangeAccent : Colors.white70,
+                isActive: _isDragLocked,
+                onTap: _toggleDragLock,
+              ),
+              const SizedBox(width: 4),
+
+              // Cuộn trang (Scroll Wheel Up / Down Rocker)
+              Container(
+                decoration: BoxDecoration(
+                  color: const Color(0x14FFFFFF),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    InkWell(
+                      borderRadius: const BorderRadius.horizontal(left: Radius.circular(14)),
+                      onTap: () => _sendInput({'type': 'mouse_wheel', 'delta_y': 240}),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+                        child: Icon(Icons.arrow_drop_up, color: Colors.white, size: 18),
+                      ),
+                    ),
+                    Container(width: 1, height: 14, color: Colors.white24),
+                    InkWell(
+                      borderRadius: const BorderRadius.horizontal(right: Radius.circular(14)),
+                      onTap: () => _sendInput({'type': 'mouse_wheel', 'delta_y': -240}),
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 5, vertical: 4),
+                        child: Icon(Icons.arrow_drop_down, color: Colors.white, size: 18),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+
+              // Nút Thu nhỏ / Ẩn (Collapse)
+              InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () => setState(() => _controlsCollapsed = true),
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(
+                    color: Color(0x14FFFFFF),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close_fullscreen, color: Colors.white60, size: 13),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDockBtn({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+    bool isActive = false,
+  }) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+        decoration: BoxDecoration(
+          color: isActive ? color.withAlpha(64) : const Color(0x12FFFFFF),
+          borderRadius: BorderRadius.circular(14),
+          border: isActive ? Border.all(color: color, width: 1) : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: color, size: 14),
+            const SizedBox(width: 3),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
