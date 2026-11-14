@@ -1,0 +1,325 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+body, html {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background-color: #0f1117;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #f0f2f5;
+}
+
+/* Connect Modal */
+#connectOverlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at top, #1e2230, #0a0c10);
+  z-index: 1000;
+  padding: 20px;
+}
+
+.card {
+  background: rgba(26, 31, 44, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 18px;
+  padding: 28px;
+  width: 100%;
+  max-width: 380px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  text-align: center;
+  backdrop-filter: blur(10px);
+}
+
+.logo-icon {
+  font-size: 40px;
+  margin-bottom: 12px;
+}
+
+.card h2 {
+  font-size: 22px;
+  margin-bottom: 6px;
+  font-weight: 700;
+  background: linear-gradient(135deg, #00d2ff, #3a7bd5);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.subtitle {
+  font-size: 13px;
+  color: #8c9ba5;
+  margin-bottom: 22px;
+}
+
+.input-group {
+  margin-bottom: 14px;
+  text-align: left;
+}
+
+.input-group label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: #a0aec0;
+  margin-bottom: 6px;
+}
+
+.input-group input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #12151e;
+  border: 1px solid #2a3245;
+  color: #fff;
+  font-size: 16px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input-group input:focus {
+  border-color: #3a7bd5;
+}
+
+.btn-primary {
+  width: 100%;
+  padding: 14px;
+  margin-top: 10px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #00d2ff, #3a7bd5);
+  color: #fff;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+.btn-primary:active {
+  transform: scale(0.98);
+}
+
+.status-msg {
+  margin-top: 14px;
+  font-size: 13px;
+  color: #ff9800;
+  min-height: 18px;
+}
+
+/* Remote Desktop Viewport */
+#viewportContainer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #000;
+  touch-action: none;
+}
+
+#remoteVideo {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+/* Touch Surface Overlay */
+#touchSurface {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  touch-action: none;
+}
+
+/* Local cursor tracker for Trackpad mode */
+#virtualCursor {
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(0, 210, 255, 0.6);
+  border: 2px solid #fff;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 20;
+  display: none;
+  box-shadow: 0 0 10px rgba(0, 210, 255, 0.8);
+}
+
+/* Floating Toolbar */
+.floating-fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(26, 31, 44, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+
+.toolbar-panel {
+  position: fixed;
+  bottom: 86px;
+  right: 20px;
+  background: rgba(18, 22, 32, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 14px;
+  padding: 12px;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 99;
+  backdrop-filter: blur(12px);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.7);
+  max-width: 90vw;
+}
+
+.toolbar-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.tool-btn {
+  background: #252c3d;
+  color: #f0f2f5;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.tool-btn.active {
+  background: #3a7bd5;
+  border-color: #00d2ff;
+}
+
+.tool-btn:active {
+  transform: scale(0.95);
+}
+
+.tool-btn.danger {
+  background: #d32f2f;
+}
+
+/* Virtual Trackpad bottom bar (optional helpers for phone) */
+.trackpad-buttons {
+  position: fixed;
+  bottom: 20px;
+  left: 20px;
+  display: flex;
+  gap: 8px;
+  z-index: 50;
+  opacity: 0.75;
+}
+
+.trackpad-buttons:hover {
+  opacity: 1;
+}
+
+.mouse-btn {
+  background: rgba(30, 36, 50, 0.85);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  padding: 12px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+
+.mouse-btn:active {
+  background: #00d2ff;
+  color: #000;
+}
+
+/* Virtual Keyboard Drawer */
+#keyboardDrawer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(15, 18, 25, 0.98);
+  border-top: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 10px 14px 24px;
+  z-index: 110;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  backdrop-filter: blur(16px);
+}
+
+.kb-text-input {
+  display: flex;
+  gap: 8px;
+}
+
+.kb-text-input input {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #1f2533;
+  border: 1px solid #36415a;
+  color: #fff;
+  font-size: 15px;
+  outline: none;
+}
+
+.kb-row {
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.kb-key {
+  background: #252d3e;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #fff;
+  padding: 9px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.kb-key:active {
+  background: #3a7bd5;
+}
+
+/* Connection info badge */
+.badge-info {
+  position: fixed;
+  top: 14px;
+  left: 14px;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  color: #00e676;
+  z-index: 50;
+  pointer-events: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}

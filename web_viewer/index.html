@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>Hybrid Remote Desktop Viewer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Badge Info -->
+  <div id="badgeInfo" class="badge-info" style="display: none;">Đang kết nối...</div>
+
+  <!-- Connect Modal -->
+  <div id="connectOverlay">
+    <div class="card">
+      <div class="logo-icon">💻📱</div>
+      <h2>Remote Connect</h2>
+      <p class="subtitle">Điều khiển máy tính từ điện thoại của bạn</p>
+
+      <div class="input-group">
+        <label for="hostIdInput">ID MÁY TÍNH (9 số)</label>
+        <input type="text" id="hostIdInput" placeholder="Ví dụ: 823 491 028" autocomplete="off" autocorrect="off">
+      </div>
+
+      <div class="input-group">
+        <label for="passcodeInput">MẬT KHẨU</label>
+        <input type="password" id="passcodeInput" placeholder="Mã PIN 4 số" autocomplete="off">
+      </div>
+
+      <button class="btn-primary" onclick="startConnect()">Kết nối ngay</button>
+      <div id="statusMsg" class="status-msg"></div>
+    </div>
+  </div>
+
+  <!-- Remote Desktop Viewport -->
+  <div id="viewportContainer">
+    <img id="remoteScreen" alt="Desktop Screen" style="max-width: 100%; max-height: 100%; object-fit: contain; pointer-events: none; display: block;" />
+    <video id="remoteVideo" autoplay playsinline muted style="display: none;"></video>
+    <div id="touchSurface"></div>
+    <div id="virtualCursor"></div>
+  </div>
+
+  <!-- Trackpad helper buttons for easy thumbs clicking -->
+  <div class="trackpad-buttons">
+    <button class="mouse-btn" onclick="sendClick('left')">🖱️ Trái</button>
+    <button class="mouse-btn" onclick="sendDblClick()">⚡ Nhấp đúp</button>
+    <button class="mouse-btn" onclick="sendClick('right')">🖱️ Phải</button>
+  </div>
+
+  <!-- Floating Menu FAB -->
+  <div class="floating-fab" onclick="toggleToolbar()">⚙️</div>
+
+  <!-- Floating Toolbar -->
+  <div id="toolbarPanel" class="toolbar-panel">
+    <div class="toolbar-row">
+      <button id="btnModeTrackpad" class="tool-btn active" onclick="setMode('trackpad')">Trackpad</button>
+      <button id="btnModeTouch" class="tool-btn" onclick="setMode('touch')">Chạm trực tiếp</button>
+    </div>
+    <div class="toolbar-row">
+      <button class="tool-btn" onclick="toggleKeyboard()">⌨️ Bàn phím</button>
+      <button class="tool-btn" onclick="toggleFullscreen()">⛶ Toàn màn hình</button>
+      <button class="tool-btn danger" onclick="disconnectSession()">Ngắt kết nối</button>
+    </div>
+    <div class="toolbar-row">
+      <button class="tool-btn" onclick="sendShortcut('ctrl+c')">Ctrl+C</button>
+      <button class="tool-btn" onclick="sendShortcut('ctrl+v')">Ctrl+V</button>
+      <button class="tool-btn" onclick="sendShortcut('win+d')">Win+D</button>
+      <button class="tool-btn" onclick="sendShortcut('alt+tab')">Alt+Tab</button>
+      <button class="tool-btn" onclick="sendShortcut('esc')">Esc</button>
+      <button class="tool-btn" onclick="sendShortcut('enter')">Enter</button>
+    </div>
+  </div>
+
+  <!-- Virtual Keyboard Drawer -->
+  <div id="keyboardDrawer">
+    <div class="kb-text-input">
+      <input type="text" id="kbTextInput" placeholder="Nhập chữ hoặc tiếng Việt có dấu..." onkeydown="if(event.key==='Enter') sendTypedText()">
+      <button class="tool-btn" style="background:#3a7bd5" onclick="sendTypedText()">Gửi</button>
+      <button class="tool-btn" onclick="toggleKeyboard()">Đóng</button>
+    </div>
+    <div class="kb-row">
+      <button class="kb-key" onclick="sendKey('escape')">Esc</button>
+      <button class="kb-key" onclick="sendKey('tab')">Tab</button>
+      <button class="kb-key" onclick="sendKey('f1')">F1</button>
+      <button class="kb-key" onclick="sendKey('f2')">F2</button>
+      <button class="kb-key" onclick="sendKey('f4')">F4</button>
+      <button class="kb-key" onclick="sendKey('f5')">F5</button>
+      <button class="kb-key" onclick="sendKey('f11')">F11</button>
+      <button class="kb-key" onclick="sendKey('delete')">Del</button>
+      <button class="kb-key" onclick="sendKey('backspace')">⌫ Xóa</button>
+    </div>
+    <div class="kb-row">
+      <button class="kb-key" onclick="sendKey('ctrl')">Ctrl</button>
+      <button class="kb-key" onclick="sendKey('win')">Win</button>
+      <button class="kb-key" onclick="sendKey('alt')">Alt</button>
+      <button class="kb-key" onclick="sendKey('shift')">Shift</button>
+      <button class="kb-key" onclick="sendKey('space')">Space</button>
+      <button class="kb-key" onclick="sendKey('left')">◀</button>
+      <button class="kb-key" onclick="sendKey('up')">▲</button>
+      <button class="kb-key" onclick="sendKey('down')">▼</button>
+      <button class="kb-key" onclick="sendKey('right')">▶</button>
+      <button class="kb-key" onclick="sendKey('enter')">Enter ↵</button>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
