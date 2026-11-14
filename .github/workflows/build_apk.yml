@@ -39,7 +39,9 @@ jobs:
 
       - name: Build Android Release APK
         working-directory: mobile_flutter
-        run: flutter build apk --release
+        run: |
+          chmod +x android/gradlew
+          flutter build apk --release
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
