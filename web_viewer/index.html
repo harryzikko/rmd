@@ -48,8 +48,11 @@
   <!-- Trackpad helper buttons for easy thumbs clicking -->
   <div class="trackpad-buttons">
     <button class="mouse-btn" onclick="sendClick('left')">🖱️ Trái</button>
-    <button class="mouse-btn" onclick="sendDblClick()">⚡ Nhấp đúp</button>
+    <button class="mouse-btn" onclick="sendDblClick()">⚡ Đúp</button>
     <button class="mouse-btn" onclick="sendClick('right')">🖱️ Phải</button>
+    <button class="mouse-btn" onclick="sendWheel(240)">🔼 Cuộn</button>
+    <button class="mouse-btn" onclick="sendWheel(-240)">🔽 Cuộn</button>
+    <button class="mouse-btn" onclick="syncClipboard()">📋 Dán</button>
   </div>
 
   <!-- Floating Menu FAB -->
@@ -62,6 +65,16 @@
       <button id="btnModeTouch" class="tool-btn" onclick="setMode('touch')">Chạm trực tiếp</button>
     </div>
     <div class="toolbar-row">
+      <button class="tool-btn" onclick="setQualityPreset('speed')">⚡ Tiết kiệm 4G</button>
+      <button class="tool-btn" onclick="setQualityPreset('balanced')">⚖️ Cân bằng</button>
+      <button class="tool-btn" onclick="setQualityPreset('hd')">💎 Full HD</button>
+    </div>
+    <div class="toolbar-row">
+      <button class="tool-btn" onclick="sendSystemAction('task_manager')">📊 Task Manager</button>
+      <button class="tool-btn" onclick="sendSystemAction('lock')">🔒 Khóa PC</button>
+      <button class="tool-btn" onclick="sendSystemAction('file_explorer')">📁 File Explorer</button>
+    </div>
+    <div class="toolbar-row">
       <button class="tool-btn" onclick="toggleKeyboard()">⌨️ Bàn phím</button>
       <button class="tool-btn" onclick="toggleFullscreen()">⛶ Toàn màn hình</button>
       <button class="tool-btn danger" onclick="disconnectSession()">Ngắt kết nối</button>
@@ -71,7 +84,7 @@
       <button class="tool-btn" onclick="sendShortcut('ctrl+v')">Ctrl+V</button>
       <button class="tool-btn" onclick="sendShortcut('win+d')">Win+D</button>
       <button class="tool-btn" onclick="sendShortcut('alt+tab')">Alt+Tab</button>
-      <button class="tool-btn" onclick="sendShortcut('esc')">Esc</button>
+      <button class="tool-btn" onclick="sendShortcut('alt+f4')">Alt+F4</button>
       <button class="tool-btn" onclick="sendShortcut('enter')">Enter</button>
     </div>
   </div>

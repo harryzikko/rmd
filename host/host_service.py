@@ -126,6 +126,15 @@ class HostService:
             if sc:
                 self.injector.trigger_shortcut(sc)
 
+        elif event_type == "clipboard_set":
+            text = data.get("text", "")
+            self.injector.set_clipboard_text(text)
+
+        elif event_type == "system_action":
+            act = data.get("action", "")
+            if act:
+                self.injector.system_action(act)
+
     async def close_all(self):
         """Shuts down all active peer connections."""
         for pc in list(self.pcs):

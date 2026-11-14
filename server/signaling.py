@@ -10,6 +10,7 @@ import threading
 import logging
 import cv2
 import mss
+import psutil
 import numpy as np
 from aiohttp import web
 from host.host_service import HostService
@@ -34,6 +35,9 @@ class SignalingServer:
         self.app.router.add_get("/api/info", self._handle_info)
         self.app.router.add_post("/api/connect", self._handle_connect)
         self.app.router.add_get("/ws/stream", self._handle_ws_stream)
+        self.app.router.add_get("/api/fs/list", self._handle_fs_list)
+        self.app.router.add_get("/api/fs/download", self._handle_fs_download)
+        self.app.router.add_post("/api/fs/upload", self._handle_fs_upload)
         self.app.router.add_get("/download/app.apk", self._handle_download_apk)
         self.app.router.add_get("/download/app.ipa", self._handle_download_ipa)
         self.app.router.add_get("/favicon.ico", self._handle_favicon)
@@ -72,6 +76,120 @@ class SignalingServer:
             )
         # Chuyển hướng tới link tải trực tiếp trên GitHub raw
         raise web.HTTPFound("https://github.com/harryzikko/rmd/raw/ipa/HybridRemote-Unsigned.ipa")
+
+    def _verify_auth(self, request):
+        req_id = str(request.query.get("id", "")).replace(" ", "")
+        req_pwd = str(request.query.get("pwd", "")).strip()
+        return req_id == self.host_id and req_pwd == self.passcode
+
+    async def _handle_fs_list(self, request):
+        if not self._verify_auth(request):
+            return web.json_response({"error": "Chưa xác thực!"}, status=403)
+
+        target_path = request.query.get("path", "").strip()
+
+        if not target_path or target_path.lower() == "drives" or target_path == "My PC":
+            try:
+                drives = []
+                for p in psutil.disk_partitions():
+                    drives.append({
+                        "name": p.mountpoint,
+                        "path": p.mountpoint,
+                        "is_dir": True,
+                        "size": 0,
+                        "mtime": 0
+                    })
+                home = os.path.expanduser("~")
+                quick_links = [
+                    {"name": "📁 Desktop", "path": os.path.join(home, "Desktop"), "is_dir": True, "size": 0, "mtime": 0},
+                    {"name": "📥 Downloads", "path": os.path.join(home, "Downloads"), "is_dir": True, "size": 0, "mtime": 0},
+                    {"name": "📄 Documents", "path": os.path.join(home, "Documents"), "is_dir": True, "size": 0, "mtime": 0},
+                ]
+                return web.json_response({
+                    "current_path": "My PC",
+                    "parent_path": "",
+                    "items": quick_links + drives
+                })
+            except Exception as e:
+                return web.json_response({"error": str(e)}, status=500)
+
+        target_path = os.path.abspath(target_path)
+        if not os.path.exists(target_path) or not os.path.isdir(target_path):
+            return web.json_response({"error": "Thư mục không tồn tại!"}, status=404)
+
+        try:
+            items = []
+            with os.scandir(target_path) as it:
+                for entry in it:
+                    try:
+                        stat = entry.stat()
+                        items.append({
+                            "name": entry.name,
+                            "path": entry.path,
+                            "is_dir": entry.is_dir(),
+                            "size": stat.st_size if not entry.is_dir() else 0,
+                            "mtime": int(stat.st_mtime)
+                        })
+                    except Exception:
+                        pass
+            items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+            parent_dir = os.path.dirname(target_path)
+            if parent_dir == target_path:
+                parent_dir = "drives"
+            return web.json_response({
+                "current_path": target_path,
+                "parent_path": parent_dir,
+                "items": items
+            })
+        except Exception as e:
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def _handle_fs_download(self, request):
+        if not self._verify_auth(request):
+            return web.Response(text="Chưa xác thực!", status=403)
+
+        file_path = request.query.get("path", "").strip()
+        if not file_path or not os.path.exists(file_path) or os.path.isdir(file_path):
+            return web.Response(text="File không tồn tại!", status=404)
+
+        filename = os.path.basename(file_path)
+        return web.FileResponse(
+            file_path,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"'
+            }
+        )
+
+    async def _handle_fs_upload(self, request):
+        if not self._verify_auth(request):
+            return web.json_response({"error": "Chưa xác thực!"}, status=403)
+
+        target_dir = request.query.get("path", "").strip()
+        if not target_dir or not os.path.isdir(target_dir):
+            target_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+            os.makedirs(target_dir, exist_ok=True)
+
+        try:
+            reader = await request.multipart()
+            field = await reader.next()
+            if not field:
+                return web.json_response({"error": "Không tìm thấy dữ liệu file!"}, status=400)
+
+            filename = field.filename or f"upload_{int(time.time())}"
+            out_path = os.path.join(target_dir, filename)
+
+            with open(out_path, "wb") as f:
+                while True:
+                    chunk = await field.read_chunk(64 * 1024)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+
+            logger.info(f"File uploaded successfully to: {out_path}")
+            return web.json_response({"success": True, "saved_path": out_path, "filename": filename})
+        except Exception as e:
+            logger.error(f"Upload error: {e}")
+            return web.json_response({"error": str(e)}, status=500)
 
     async def _handle_favicon(self, request):
         return web.Response(status=204)
@@ -131,13 +249,43 @@ class SignalingServer:
         logger.info("WebSocket Client authenticated! Starting real-time stream...")
         attach_to_desktop()
 
+        quality_cfg = {
+            "scale_w": 1280,
+            "scale_h": 720,
+            "quality": 55,
+            "delay": 1.0 / 25.0,
+        }
+
         async def receive_inputs():
             try:
                 async for msg in ws:
                     if msg.type == web.WSMsgType.TEXT:
                         try:
                             data = json.loads(msg.data)
-                            self.host_service._process_input(data)
+                            event_type = data.get("type")
+                            if event_type == "clipboard_get":
+                                clip_text = self.host_service.injector.get_clipboard_text()
+                                await ws.send_json({"type": "clipboard_data", "text": clip_text})
+                            elif event_type == "set_quality":
+                                preset = data.get("preset", "balanced")
+                                if preset == "speed":
+                                    quality_cfg["scale_w"] = 960
+                                    quality_cfg["scale_h"] = 540
+                                    quality_cfg["quality"] = 40
+                                    quality_cfg["delay"] = 1.0 / 20.0
+                                elif preset == "hd":
+                                    quality_cfg["scale_w"] = 1600
+                                    quality_cfg["scale_h"] = 900
+                                    quality_cfg["quality"] = 75
+                                    quality_cfg["delay"] = 1.0 / 30.0
+                                else:
+                                    quality_cfg["scale_w"] = 1280
+                                    quality_cfg["scale_h"] = 720
+                                    quality_cfg["quality"] = 55
+                                    quality_cfg["delay"] = 1.0 / 25.0
+                                logger.info(f"Stream quality preset updated to: {preset}")
+                            else:
+                                self.host_service._process_input(data)
                         except Exception as e:
                             logger.error(f"Input parse error: {e}")
                     elif msg.type in [web.WSMsgType.CLOSE, web.WSMsgType.ERROR]:
@@ -156,14 +304,16 @@ class SignalingServer:
             monitor = sct.monitors[1]
             orig_w = monitor["width"]
             orig_h = monitor["height"]
-            scale_w = 1280
-            scale_h = 720
             mon_l = monitor.get("left", 0)
             mon_t = monitor.get("top", 0)
-            target_delay = 1.0 / 25.0
 
             while not stop_worker.is_set():
                 t0 = time.time()
+                scale_w = quality_cfg["scale_w"]
+                scale_h = quality_cfg["scale_h"]
+                target_delay = quality_cfg["delay"]
+                jpeg_q = quality_cfg["quality"]
+
                 try:
                     raw = np.array(sct.grab(monitor)) # BGRA
                     bgr = raw[:, :, :3]
@@ -193,8 +343,8 @@ class SignalingServer:
                     except Exception:
                         pass
 
-                    # Compress to JPEG (Quality: 55 - low bandwidth, fast delivery, zero lag)
-                    success, jpeg_data = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 55])
+                    # Compress to JPEG
+                    success, jpeg_data = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, jpeg_q])
                     if success:
                         nonlocal latest_jpeg
                         latest_jpeg = jpeg_data.tobytes()

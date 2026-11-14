@@ -5,6 +5,13 @@ Handles mouse movement, clicks, scrolling, virtual keys, shortcuts, and Unicode 
 import ctypes
 import ctypes.wintypes
 import time
+import subprocess
+try:
+    import win32clipboard
+    import win32con
+    HAS_WIN32_CLIP = True
+except ImportError:
+    HAS_WIN32_CLIP = False
 from host.desktop_attach import attach_to_desktop
 
 u32 = ctypes.windll.user32
@@ -52,9 +59,20 @@ VK_MAP = {
     "up": 0x26,
     "right": 0x27,
     "down": 0x28,
+    "arrowup": 0x26,
+    "arrowdown": 0x28,
+    "arrowleft": 0x25,
+    "arrowright": 0x27,
     "printscreen": 0x2C,
+    "prtscn": 0x2C,
     "insert": 0x2D,
     "delete": 0x2E,
+    "del": 0x2E,
+    "pgup": 0x21,
+    "pgdn": 0x22,
+    "volumeup": 0xAF,
+    "volumedown": 0xAE,
+    "volumemute": 0xAD,
     "win": 0x5B,
     "meta": 0x5B,
     "f1": 0x70, "f2": 0x71, "f3": 0x72, "f4": 0x73,
@@ -227,3 +245,66 @@ class InputInjector:
         time.sleep(0.03)
         for k in reversed(keys):
             self.key_event(k, "up")
+
+    def get_clipboard_text(self) -> str:
+        """Reads unicode text from Windows clipboard."""
+        if not HAS_WIN32_CLIP:
+            return ""
+        try:
+            attach_to_desktop()
+            win32clipboard.OpenClipboard()
+            try:
+                if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                    return win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT) or ""
+                return ""
+            finally:
+                win32clipboard.CloseClipboard()
+        except Exception as e:
+            print(f"[InputInjector] Clipboard read error: {e}")
+            return ""
+
+    def set_clipboard_text(self, text: str) -> bool:
+        """Sets unicode text to Windows clipboard."""
+        if not HAS_WIN32_CLIP:
+            return False
+        try:
+            attach_to_desktop()
+            win32clipboard.OpenClipboard()
+            try:
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
+                return True
+            finally:
+                win32clipboard.CloseClipboard()
+        except Exception as e:
+            print(f"[InputInjector] Clipboard write error: {e}")
+            return False
+
+    def system_action(self, action: str):
+        """Executes system actions like lock, task manager, power options."""
+        attach_to_desktop()
+        act = action.lower()
+        if act == "lock":
+            u32.LockWorkStation()
+        elif act in ["task_manager", "taskmgr"]:
+            self.trigger_shortcut("ctrl+shift+escape")
+        elif act == "file_explorer":
+            self.trigger_shortcut("win+e")
+        elif act == "run_dialog":
+            self.trigger_shortcut("win+r")
+        elif act == "close_window":
+            self.trigger_shortcut("alt+f4")
+        elif act == "switch_window":
+            self.trigger_shortcut("alt+tab")
+        elif act == "privacy_on":
+            # Turn off physical monitor (sleep)
+            u32.SendMessageW(0xFFFF, 0x0112, 0xF170, 2)
+        elif act == "privacy_off":
+            # Wake physical monitor
+            u32.SendMessageW(0xFFFF, 0x0112, 0xF170, -1)
+        elif act == "reboot":
+            subprocess.Popen("shutdown /r /t 5", shell=True)
+        elif act == "shutdown":
+            subprocess.Popen("shutdown /s /t 5", shell=True)
+        elif act == "cancel_shutdown":
+            subprocess.Popen("shutdown /a", shell=True)

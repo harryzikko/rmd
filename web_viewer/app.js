@@ -132,6 +132,33 @@ async function startConnect() {
   }
 }
 
+function sendSystemAction(action) {
+  sendInput({ type: "system_action", action: action });
+}
+
+function setQualityPreset(preset) {
+  sendInput({ type: "set_quality", preset: preset });
+}
+
+async function syncClipboard() {
+  try {
+    const text = await navigator.clipboard.readText();
+    if (text) {
+      sendInput({ type: "clipboard_set", text: text });
+      alert("Đã gửi Clipboard tới máy tính: " + text.substring(0, 40));
+    }
+  } catch (e) {
+    const manual = prompt("Nhập văn bản cần dán vào máy tính:");
+    if (manual) {
+      sendInput({ type: "clipboard_set", text: manual });
+    }
+  }
+}
+
+function sendWheel(delta) {
+  sendInput({ type: "mouse_wheel", delta_y: delta });
+}
+
 function sendInput(payload) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload));
