@@ -6,6 +6,7 @@ import os
 import json
 import time
 import asyncio
+import threading
 import logging
 import cv2
 import mss
@@ -24,7 +25,7 @@ class SignalingServer:
         self.static_dir = static_dir
         self.app = web.Application()
         self.cursor_poly = np.array(
-            [[0, 0], [0, 18], [5, 14], [9, 23], [13, 21], [9, 13], [16, 13]],
+            [[0, 0], [0, 26], [7, 20], [12, 31], [16, 29], [11, 18], [20, 18]],
             dtype=np.int32,
         )
         self._setup_routes()
@@ -144,7 +145,12 @@ class SignalingServer:
             except Exception:
                 pass
 
-        async def stream_screen():
+        stop_worker = threading.Event()
+        latest_jpeg = None
+        new_frame_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+
+        def capture_worker():
             attach_to_desktop()
             sct = mss.MSS()
             monitor = sct.monitors[1]
@@ -152,43 +158,71 @@ class SignalingServer:
             orig_h = monitor["height"]
             scale_w = 1280
             scale_h = 720
-            fps = 30
-            frame_delay = 1.0 / fps
+            mon_l = monitor.get("left", 0)
+            mon_t = monitor.get("top", 0)
+            target_delay = 1.0 / 25.0
 
-            while not ws.closed:
+            while not stop_worker.is_set():
                 t0 = time.time()
                 try:
                     raw = np.array(sct.grab(monitor)) # BGRA
                     bgr = raw[:, :, :3]
 
-                    # Draw mouse cursor
-                    try:
-                        cx, cy = self.host_service.injector.get_cursor_pos()
-                        poly = self.cursor_poly + [cx, cy]
-                        cv2.fillPoly(bgr, [poly], (255, 255, 255))
-                        cv2.polylines(bgr, [poly], True, (0, 0, 0), 1, cv2.LINE_AA)
-                    except Exception:
-                        pass
-
-                    # Resize to 720p for fast 4G delivery
+                    # Scale down
                     if (scale_w, scale_h) != (orig_w, orig_h):
                         frame = cv2.resize(bgr, (scale_w, scale_h), interpolation=cv2.INTER_LINEAR)
                     else:
                         frame = bgr
 
-                    # Compress to JPEG (Quality: 65 - optimal for 4G)
-                    success, jpeg_data = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 65])
+                    # Draw prominent, high-contrast mouse cursor AFTER resizing
+                    try:
+                        cx, cy = self.host_service.injector.get_cursor_pos()
+                        cur_x = int((cx - mon_l) * scale_w / orig_w)
+                        cur_y = int((cy - mon_t) * scale_h / orig_h)
+
+                        if 0 <= cur_x < scale_w and 0 <= cur_y < scale_h:
+                            poly = self.cursor_poly + [cur_x, cur_y]
+                            # Drop shadow
+                            cv2.fillPoly(frame, [self.cursor_poly + [cur_x + 2, cur_y + 2]], (20, 20, 20))
+                            # 3px high-contrast black border
+                            cv2.polylines(frame, [poly], True, (0, 0, 0), 3, cv2.LINE_AA)
+                            # Bright white fill
+                            cv2.fillPoly(frame, [poly], (255, 255, 255))
+                            # Yellow accent tip dot
+                            cv2.circle(frame, (cur_x, cur_y), 3, (0, 255, 255), -1)
+                    except Exception:
+                        pass
+
+                    # Compress to JPEG (Quality: 55 - low bandwidth, fast delivery, zero lag)
+                    success, jpeg_data = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 55])
                     if success:
-                        await ws.send_bytes(jpeg_data.tobytes())
+                        nonlocal latest_jpeg
+                        latest_jpeg = jpeg_data.tobytes()
+                        loop.call_soon_threadsafe(new_frame_event.set)
 
                 except Exception as e:
                     logger.debug(f"Frame capture error: {e}")
 
                 elapsed = time.time() - t0
-                if elapsed < frame_delay:
-                    await asyncio.sleep(frame_delay - elapsed)
+                rem = target_delay - elapsed
+                if rem > 0:
+                    time.sleep(rem)
                 else:
-                    await asyncio.sleep(0.001)
+                    time.sleep(0.001)
+
+        worker_thread = threading.Thread(target=capture_worker, daemon=True)
+        worker_thread.start()
+
+        async def stream_screen():
+            try:
+                while not ws.closed:
+                    await new_frame_event.wait()
+                    new_frame_event.clear()
+                    frame_bytes = latest_jpeg
+                    if frame_bytes and not ws.closed:
+                        await ws.send_bytes(frame_bytes)
+            finally:
+                stop_worker.set()
 
         input_task = asyncio.create_task(receive_inputs())
         stream_task = asyncio.create_task(stream_screen())

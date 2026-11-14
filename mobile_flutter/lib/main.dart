@@ -194,7 +194,13 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
   String _status = 'Đang kết nối...';
   String _mode = 'trackpad'; // 'trackpad' or 'touch'
   bool _showKeyboard = false;
+  bool _isLandscape = false;
   final _textCtrl = TextEditingController();
+
+  // Virtual cursor position on mobile screen
+  Offset? _virtualCursorPos;
+  int _lastMouseMoveTime = 0;
+  Size _currentContainerSize = const Size(1280, 720);
 
   // Desktop native resolution
   final double _desktopW = 1920;
@@ -205,6 +211,23 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
     super.initState();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     _connectWebSocket();
+  }
+
+  void _toggleOrientation() {
+    setState(() {
+      _isLandscape = !_isLandscape;
+      _virtualCursorPos = null; // Re-center on next layout
+      if (_isLandscape) {
+        SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      } else {
+        SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+        ]);
+      }
+    });
   }
 
   void _connectWebSocket() {
@@ -255,6 +278,18 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
     }
   }
 
+  void _throttledMouseMove(double normX, double normY) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastMouseMoveTime >= 20) { // Max 50Hz update rate
+      _lastMouseMoveTime = now;
+      _sendInput({
+        'type': 'mouse_move_abs',
+        'x': normX.clamp(0.0, 1.0),
+        'y': normY.clamp(0.0, 1.0),
+      });
+    }
+  }
+
   /// Calculates exact letterboxed image rect inside container
   Rect _getRenderedImageRect(Size containerSize) {
     final imageAspect = _desktopW / _desktopH;
@@ -275,6 +310,24 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
     }
 
     return Rect.fromLTWH(offsetX, offsetY, renderW, renderH);
+  }
+
+  void _sendMouseClick(String button, String action) {
+    if (_mode == 'trackpad' && _virtualCursorPos != null) {
+      final imageRect = _getRenderedImageRect(_currentContainerSize);
+      final normX = (_virtualCursorPos!.dx - imageRect.left) / imageRect.width;
+      final normY = (_virtualCursorPos!.dy - imageRect.top) / imageRect.height;
+      _sendInput({
+        'type': 'mouse_move_abs',
+        'x': normX.clamp(0.0, 1.0),
+        'y': normY.clamp(0.0, 1.0),
+      });
+    }
+    _sendInput({
+      'type': 'mouse_button',
+      'button': button,
+      'action': action,
+    });
   }
 
   void _handleDirectTouch(Offset localPos, Size containerSize, String action) {
@@ -304,6 +357,12 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
 
   @override
   void dispose() {
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     _sub?.cancel();
     _channel?.sink.close();
@@ -321,6 +380,9 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final containerSize = Size(constraints.maxWidth, constraints.maxHeight);
+                _currentContainerSize = containerSize;
+                final imageRect = _getRenderedImageRect(containerSize);
+                _virtualCursorPos ??= imageRect.center;
 
                 return Stack(
                   children: [
@@ -333,21 +395,48 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
                             )
                           : Text(_status, style: const TextStyle(color: Colors.white70)),
                     ),
+
+                    // High-Visibility Virtual Cursor Overlay for Trackpad Mode
+                    if (_mode == 'trackpad' && _virtualCursorPos != null)
+                      Positioned(
+                        left: _virtualCursorPos!.dx,
+                        top: _virtualCursorPos!.dy,
+                        child: IgnorePointer(
+                          child: CustomPaint(
+                            size: const Size(22, 28),
+                            painter: VirtualCursorPainter(),
+                          ),
+                        ),
+                      ),
+
                     // Gesture Detector for Mouse & Touch
                     Positioned.fill(
                       child: GestureDetector(
                         behavior: HitTestBehavior.translucent,
                         onPanUpdate: (details) {
                           if (_mode == 'trackpad') {
-                            // Relative movement with fine control (no drift)
-                            _sendInput({
-                              'type': 'mouse_move_rel',
-                              'dx': details.delta.dx * 1.25,
-                              'dy': details.delta.dy * 1.25,
+                            final newX = (_virtualCursorPos!.dx + details.delta.dx * 1.3).clamp(imageRect.left, imageRect.right);
+                            final newY = (_virtualCursorPos!.dy + details.delta.dy * 1.3).clamp(imageRect.top, imageRect.bottom);
+                            setState(() {
+                              _virtualCursorPos = Offset(newX, newY);
                             });
+                            final normX = (newX - imageRect.left) / imageRect.width;
+                            final normY = (newY - imageRect.top) / imageRect.height;
+                            _throttledMouseMove(normX, normY);
                           } else {
-                            // Pixel-perfect direct touch
+                            // Direct touch
                             _handleDirectTouch(details.localPosition, containerSize, '');
+                          }
+                        },
+                        onPanEnd: (_) {
+                          if (_mode == 'trackpad' && _virtualCursorPos != null) {
+                            final normX = (_virtualCursorPos!.dx - imageRect.left) / imageRect.width;
+                            final normY = (_virtualCursorPos!.dy - imageRect.top) / imageRect.height;
+                            _sendInput({
+                              'type': 'mouse_move_abs',
+                              'x': normX.clamp(0.0, 1.0),
+                              'y': normY.clamp(0.0, 1.0),
+                            });
                           }
                         },
                         onTapDown: (details) {
@@ -359,14 +448,21 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
                           if (_mode == 'touch') {
                             _handleDirectTouch(details.localPosition, containerSize, 'up');
                           } else {
+                            final normX = (_virtualCursorPos!.dx - imageRect.left) / imageRect.width;
+                            final normY = (_virtualCursorPos!.dy - imageRect.top) / imageRect.height;
+                            _sendInput({
+                              'type': 'mouse_move_abs',
+                              'x': normX.clamp(0.0, 1.0),
+                              'y': normY.clamp(0.0, 1.0),
+                            });
                             _sendInput({'type': 'mouse_button', 'button': 'left', 'action': 'click'});
                           }
                         },
                         onDoubleTap: () {
-                          _sendInput({'type': 'mouse_button', 'button': 'left', 'action': 'dblclick'});
+                          _sendMouseClick('left', 'dblclick');
                         },
                         onLongPress: () {
-                          _sendInput({'type': 'mouse_button', 'button': 'right', 'action': 'click'});
+                          _sendMouseClick('right', 'click');
                         },
                       ),
                     ),
@@ -376,17 +472,54 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
             ),
           ),
 
+          // Top Status & Mode Indicator Badge
+          Positioned(
+            top: 16,
+            left: 16,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: const Color(0xCC1A1F2C),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.white24),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: _connected ? Colors.greenAccent : Colors.orangeAccent,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    _mode == 'trackpad' ? '🖱️ Trackpad' : '👆 Chạm trực tiếp',
+                    style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+          ),
+
           // Bottom Trackpad Helper Buttons
           Positioned(
             bottom: 16,
             left: 16,
+            right: 16,
             child: Row(
               children: [
-                _buildMouseBtn('🖱️ Trái', () => _sendInput({'type': 'mouse_button', 'button': 'left', 'action': 'click'})),
-                const SizedBox(width: 8),
-                _buildMouseBtn('⚡ Nhấp đúp', () => _sendInput({'type': 'mouse_button', 'button': 'left', 'action': 'dblclick'})),
-                const SizedBox(width: 8),
-                _buildMouseBtn('🖱️ Phải', () => _sendInput({'type': 'mouse_button', 'button': 'right', 'action': 'click'})),
+                _buildMouseBtn('🖱️ Trái', () => _sendMouseClick('left', 'click')),
+                const SizedBox(width: 6),
+                _buildMouseBtn('⚡ Đúp', () => _sendMouseClick('left', 'dblclick')),
+                const SizedBox(width: 6),
+                _buildMouseBtn('🖱️ Phải', () => _sendMouseClick('right', 'click')),
+                const SizedBox(width: 6),
+                _buildMouseBtn('🔼 Cuộn', () => _sendInput({'type': 'mouse_wheel', 'delta': 240})),
+                const SizedBox(width: 6),
+                _buildMouseBtn('🔽 Cuộn', () => _sendInput({'type': 'mouse_wheel', 'delta': -240})),
               ],
             ),
           ),
@@ -397,6 +530,13 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
             right: 16,
             child: Row(
               children: [
+                _buildToolIcon(
+                  _isLandscape ? Icons.stay_current_portrait : Icons.screen_rotation,
+                  _toggleOrientation,
+                  tooltip: _isLandscape ? 'Chuyển màn hình dọc' : 'Xoay ngang màn hình (Cực rõ)',
+                  color: _isLandscape ? Colors.greenAccent : Colors.white,
+                ),
+                const SizedBox(width: 8),
                 _buildToolIcon(
                   _mode == 'trackpad' ? Icons.touch_app : Icons.mouse,
                   () => setState(() => _mode = _mode == 'trackpad' ? 'touch' : 'trackpad'),
@@ -528,4 +668,53 @@ class _RemoteViewerScreenState extends State<RemoteViewerScreen> {
       ),
     );
   }
+}
+
+/// High-visibility desktop mouse cursor for mobile trackpad mode
+class VirtualCursorPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final shadowPaint = Paint()
+      ..color = Colors.black.withAlpha(150)
+      ..style = PaintingStyle.fill
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
+
+    final borderPaint = Paint()
+      ..color = Colors.black
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5
+      ..strokeJoin = StrokeJoin.round;
+
+    final fillPaint = Paint()
+      ..color = const Color(0xFF00E5FF) // Electric Cyan
+      ..style = PaintingStyle.fill;
+
+    final path = Path()
+      ..moveTo(0, 0)
+      ..lineTo(0, 24)
+      ..lineTo(6, 19)
+      ..lineTo(11, 28)
+      ..lineTo(15, 26)
+      ..lineTo(10, 17)
+      ..lineTo(18, 17)
+      ..close();
+
+    // Drop shadow
+    canvas.save();
+    canvas.translate(2, 2);
+    canvas.drawPath(path, shadowPaint);
+    canvas.restore();
+
+    // Outer high-contrast black border
+    canvas.drawPath(path, borderPaint);
+
+    // Bright cyan fill
+    canvas.drawPath(path, fillPaint);
+
+    // Crisp white tip dot for precise targeting
+    canvas.drawCircle(Offset.zero, 2.5, Paint()..color = Colors.white);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

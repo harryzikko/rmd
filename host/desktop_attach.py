@@ -17,6 +17,14 @@ def attach_to_desktop():
         hdesk = u32.OpenDesktopW("default", 0, False, 0x10000000)
         if hdesk:
             u32.SetThreadDesktop(hdesk)
+        # Enable DPI awareness to avoid coordinate mismatch on high-DPI displays
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            try:
+                u32.SetProcessDPIAware()
+            except Exception:
+                pass
         return True
     except Exception as e:
         print(f"[DesktopAttach] Warning: {e}")
