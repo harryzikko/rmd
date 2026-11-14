@@ -6,6 +6,9 @@ on:
     tags: [ 'v*' ]
   workflow_dispatch: # Cho phép bấm nút "Run workflow" thủ công trên GitHub
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Android Release APK
