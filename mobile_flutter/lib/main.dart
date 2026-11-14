@@ -25,20 +25,55 @@ class ConnectScreen extends StatefulWidget {
 }
 
 class _ConnectScreenState extends State<ConnectScreen> {
-  final _urlCtrl = TextEditingController();
   final _hostIdCtrl = TextEditingController(text: '888 666 999');
   final _pwdCtrl = TextEditingController(text: '1234');
+  final _urlCtrl = TextEditingController();
+  bool _showAdvanced = false;
+  bool _searching = false;
   String _status = '';
 
   // Quick saved history list (in-memory persistent across app session)
   static final List<Map<String, String>> _recentHosts = [
     {
       'title': 'Máy tính Windows chính (888 666 999)',
-      'url': 'https://signs-scuba-advantage-amazing.trycloudflare.com',
       'id': '888 666 999',
       'pwd': '1234',
     }
   ];
+
+  Future<String?> _resolveHostUrl(String hostId) async {
+    final cleanId = hostId.replaceAll(' ', '');
+    final topic = 'hybrid-remote-registry-$cleanId';
+    try {
+      final res = await http
+          .get(Uri.parse('https://ntfy.sh/$topic/raw?poll=1'))
+          .timeout(const Duration(seconds: 4));
+
+      if (res.statusCode == 200 && res.body.trim().isNotEmpty) {
+        final lines = res.body
+            .split('\n')
+            .map((l) => l.trim())
+            .where((l) => l.isNotEmpty)
+            .toList();
+        if (lines.isNotEmpty) {
+          final latest = lines.last;
+          try {
+            final json = jsonDecode(latest);
+            if (json is Map && json['url'] != null) {
+              return (json['url'] as String).trim();
+            }
+          } catch (_) {
+            if (latest.startsWith('http://') || latest.startsWith('https://')) {
+              return latest.trim();
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Discovery error: $e');
+    }
+    return null;
+  }
 
   void _pasteFullLink() async {
     final data = await Clipboard.getData('text/plain');
@@ -61,31 +96,56 @@ class _ConnectScreenState extends State<ConnectScreen> {
     }
   }
 
-  void _connect([String? overrideUrl, String? overrideId, String? overridePwd]) {
-    String serverUrl = (overrideUrl ?? _urlCtrl.text).trim();
+  Future<void> _connect([String? overrideUrl, String? overrideId, String? overridePwd]) async {
     final hostId = (overrideId ?? _hostIdCtrl.text).trim().replaceAll(' ', '');
     final passcode = (overridePwd ?? _pwdCtrl.text).trim();
+    String serverUrl = (overrideUrl ?? _urlCtrl.text).trim();
 
-    if (serverUrl.isEmpty || hostId.isEmpty || passcode.isEmpty) {
-      setState(() => _status = 'Vui lòng điền đủ Đường dẫn, ID và Mật khẩu!');
+    if (hostId.isEmpty || passcode.isEmpty) {
+      setState(() => _status = 'Vui lòng nhập ID máy tính và Mật khẩu PIN!');
       return;
+    }
+
+    // Auto-discovery if no URL provided (Standard TeamViewer style)
+    if (serverUrl.isEmpty) {
+      setState(() {
+        _searching = true;
+        _status = '🔍 Đang tự động tìm máy tính $hostId...';
+      });
+
+      final discoveredUrl = await _resolveHostUrl(hostId);
+      if (discoveredUrl != null && discoveredUrl.isNotEmpty) {
+        serverUrl = discoveredUrl;
+        setState(() {
+          _status = '✅ Đã tìm thấy máy chủ! Đang kết nối...';
+        });
+      } else {
+        setState(() {
+          _searching = false;
+          _status = '❌ Không tìm thấy máy tính $hostId!\nVui lòng kiểm tra máy tính đã bật Host chưa, hoặc mở "Tùy chọn nâng cao" để nhập URL thủ công.';
+        });
+        return;
+      }
     }
 
     if (!serverUrl.startsWith('http://') && !serverUrl.startsWith('https://')) {
       serverUrl = 'https://$serverUrl';
     }
 
-    // Save to recents if not already there
-    final exists = _recentHosts.any((h) => h['url'] == serverUrl && h['id'] == hostId);
+    // Save to recents
+    final exists = _recentHosts.any((h) => h['id'] == hostId);
     if (!exists) {
       _recentHosts.insert(0, {
         'title': 'Máy tính ID $hostId',
-        'url': serverUrl,
         'id': hostId,
         'pwd': passcode,
+        'url': serverUrl,
       });
     }
 
+    setState(() => _searching = false);
+
+    if (!mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -133,52 +193,47 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 const Center(
                   child: Text(
-                    'Chuẩn TeamViewer & Remote Desktop Connection',
-                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                    'Kết nối tự động bằng ID • Chuẩn TeamViewer',
+                    style: TextStyle(color: Colors.cyanAccent, fontSize: 12),
                   ),
                 ),
-                const SizedBox(height: 20),
-                TextField(
-                  controller: _urlCtrl,
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: 'Link Server / Domain / LAN IP',
-                    labelStyle: const TextStyle(color: Colors.white70),
-                    hintText: 'https://xxxx.trycloudflare.com',
-                    hintStyle: const TextStyle(color: Colors.white24),
-                    border: const OutlineInputBorder(),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.paste, color: Colors.blueAccent),
-                      tooltip: 'Dán toàn bộ link kết nối',
-                      onPressed: _pasteFullLink,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 22),
+
+                // Primary Input 1: Host ID
                 TextField(
                   controller: _hostIdCtrl,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold, letterSpacing: 1.2),
                   decoration: const InputDecoration(
-                    labelText: 'ID Máy tính (9 số)',
-                    labelStyle: TextStyle(color: Colors.white70),
+                    labelText: 'ID MÁY TÍNH (9 số)',
+                    labelStyle: TextStyle(color: Colors.cyanAccent, fontSize: 13, fontWeight: FontWeight.w600),
+                    prefixIcon: Icon(Icons.computer, color: Colors.cyanAccent),
                     border: OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Color(0xFF141923),
                   ),
                 ),
                 const SizedBox(height: 14),
+
+                // Primary Input 2: PIN
                 TextField(
                   controller: _pwdCtrl,
                   obscureText: true,
-                  style: const TextStyle(color: Colors.white),
+                  style: const TextStyle(color: Colors.white, fontSize: 17, letterSpacing: 2),
                   decoration: const InputDecoration(
-                    labelText: 'Mã PIN',
-                    labelStyle: TextStyle(color: Colors.white70),
+                    labelText: 'MÃ PIN BẢO MẬT',
+                    labelStyle: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600),
+                    prefixIcon: Icon(Icons.lock, color: Colors.white70),
                     border: OutlineInputBorder(),
+                    filled: true,
+                    fillColor: Color(0xFF141923),
                   ),
                 ),
                 const SizedBox(height: 20),
+
+                // Big Connect Button
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF3A7BD5),
@@ -186,19 +241,69 @@ class _ConnectScreenState extends State<ConnectScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  icon: const Icon(Icons.bolt),
-                  onPressed: () => _connect(),
-                  label: const Text('KẾT NỐI NGAY', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  icon: _searching
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.bolt, size: 22),
+                  onPressed: _searching ? null : () => _connect(),
+                  label: Text(
+                    _searching ? 'ĐANG TÌM MÁY CHỦ...' : 'KẾT NỐI NGAY',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
                 ),
+
                 if (_status.isNotEmpty) ...[
                   const SizedBox(height: 12),
-                  Text(_status, style: const TextStyle(color: Colors.orange, fontSize: 13), textAlign: TextAlign.center),
+                  Text(_status, style: const TextStyle(color: Colors.orange, fontSize: 12), textAlign: TextAlign.center),
                 ],
-                if (_recentHosts.isNotEmpty) ...[
-                  const SizedBox(height: 24),
-                  const Divider(color: Colors.white24),
+
+                // Advanced / Manual URL Toggle
+                const SizedBox(height: 12),
+                Center(
+                  child: TextButton.icon(
+                    style: TextButton.styleFrom(foregroundColor: Colors.white54),
+                    icon: Icon(_showAdvanced ? Icons.keyboard_arrow_up : Icons.tune, size: 16),
+                    label: Text(_showAdvanced ? 'Ẩn tùy chọn nâng cao' : 'Tùy chọn nâng cao (Nhập URL / LAN IP)', style: const TextStyle(fontSize: 12)),
+                    onPressed: () => setState(() => _showAdvanced = !_showAdvanced),
+                  ),
+                ),
+
+                if (_showAdvanced) ...[
                   const SizedBox(height: 8),
-                  const Text('⚡ Kết nối gần đây (1 chạm):', style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(color: const Color(0xFF12151E), borderRadius: BorderRadius.circular(8)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        TextField(
+                          controller: _urlCtrl,
+                          style: const TextStyle(color: Colors.white, fontSize: 13),
+                          decoration: InputDecoration(
+                            labelText: 'Đường dẫn thủ công (URL / LAN IP)',
+                            labelStyle: const TextStyle(color: Colors.white54, fontSize: 11),
+                            hintText: 'https://xxxx.trycloudflare.com hoặc IP LAN',
+                            hintStyle: const TextStyle(color: Colors.white24, fontSize: 11),
+                            isDense: true,
+                            border: const OutlineInputBorder(),
+                            suffixIcon: IconButton(
+                              icon: const Icon(Icons.paste, color: Colors.blueAccent, size: 18),
+                              tooltip: 'Dán toàn bộ link',
+                              onPressed: _pasteFullLink,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        const Text('Để trống ô này để App tự động tìm theo ID.', style: TextStyle(color: Colors.white38, fontSize: 10)),
+                      ],
+                    ),
+                  ),
+                ],
+
+                if (_recentHosts.isNotEmpty) ...[
+                  const SizedBox(height: 20),
+                  const Divider(color: Colors.white24),
+                  const SizedBox(height: 6),
+                  const Text('⚡ Máy tính đã lưu (1 chạm để vào):', style: TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
                   ...List.generate(_recentHosts.length, (idx) {
                     final item = _recentHosts[idx];
@@ -211,8 +316,8 @@ class _ConnectScreenState extends State<ConnectScreen> {
                       child: ListTile(
                         dense: true,
                         leading: const Icon(Icons.computer, color: Colors.cyanAccent),
-                        title: Text(item['title'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 13)),
-                        subtitle: Text(item['url'] ?? '', style: const TextStyle(color: Colors.white38, fontSize: 11), maxLines: 1, overflow: TextOverflow.ellipsis),
+                        title: Text(item['title'] ?? '', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
+                        subtitle: Text('ID: ${item['id']}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
                         trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white38, size: 14),
                         onTap: () => _connect(item['url'], item['id'], item['pwd']),
                       ),

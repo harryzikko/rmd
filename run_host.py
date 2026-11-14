@@ -12,6 +12,7 @@ import re
 import subprocess
 import threading
 import logging
+import urllib.request
 import qrcode
 from aiohttp import web
 from host.host_service import HostService
@@ -111,6 +112,35 @@ def start_cloudflared_tunnel(local_port=8000):
         logger.warning(f"Không thể khởi động Cloudflare Tunnel: {e}")
         return None, None
 
+def start_rendezvous_heartbeat(clean_id, tunnel_url, lan_url):
+    """
+    Publishes current host connection URL to discovery registry (ntfy.sh)
+    every 60s so mobile phones can connect by 9-digit ID with 0 configuration.
+    """
+    topic = f"hybrid-remote-registry-{clean_id}"
+    payload = json.dumps({
+        "id": clean_id,
+        "url": tunnel_url,
+        "lan_url": lan_url,
+        "updated_at": int(time.time()),
+    }).encode("utf-8")
+
+    def publish_loop():
+        while True:
+            try:
+                req = urllib.request.Request(
+                    f"https://ntfy.sh/{topic}/publish",
+                    data=payload,
+                    headers={"Title": "HybridRemote-HostDiscovery"}
+                )
+                urllib.request.urlopen(req, timeout=5)
+            except Exception as e:
+                logger.debug(f"Discovery heartbeat warning: {e}")
+            time.sleep(60)
+
+    t = threading.Thread(target=publish_loop, daemon=True)
+    t.start()
+
 def main():
     port = 8000
     kill_process_on_port(port)
@@ -135,9 +165,16 @@ def main():
     print("=" * 65)
     print(f"   📌 ID CỐ ĐỊNH (TeamViewer Style): \033[1;36m{device_id}\033[0m")
     print(f"   🔑 MẬT KHẨU PIN                : \033[1;32m{passcode}\033[0m")
+    if tunnel_url:
+        start_rendezvous_heartbeat(clean_id, tunnel_url, lan_url)
+
+    print("-" * 65)
+    print("   ✨ ĐỒNG BỘ TỰ ĐỘNG CHUẨN TEAMVIEWER:")
+    print(f"      Điện thoại chỉ cần nhập ID: \033[1;36m{device_id}\033[0m và PIN: \033[1;32m{passcode}\033[0m")
+    print("      (Không cần nhập hay nhớ bất kỳ đường dẫn URL nào!)")
     print("-" * 65)
     if tunnel_url:
-        print("   🌍 KẾT NỐI TOÀN CẦU (4G / 5G / Khác Wi-Fi / Ra ngoài đường):")
+        print("   🌍 KẾT NỐI QUA TRÌNH DUYỆT (Nếu không dùng App):")
         print(f"      🔗 {primary_url}")
         print("-" * 65)
     print(f"   🏠 KẾT NỐI NỘI BỘ (Chung Wi-Fi LAN):")
