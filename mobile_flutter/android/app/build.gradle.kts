@@ -7,7 +7,7 @@ plugins {
 android {
     namespace = "com.antigravity.remotedesktop.hybrid_remote_mobile"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

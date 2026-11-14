@@ -33,6 +33,9 @@ jobs:
       - name: Check Flutter Doctor
         run: flutter doctor -v
 
+      - name: Accept Android Licenses
+        run: yes | flutter doctor --android-licenses || true
+
       - name: Install Dependencies
         working-directory: mobile_flutter
         run: flutter pub get
@@ -41,7 +44,17 @@ jobs:
         working-directory: mobile_flutter
         run: |
           chmod +x android/gradlew
-          flutter build apk --release
+          flutter build apk --release -v 2>&1 | tee build.log
+
+      - name: Save build failure log to branch
+        if: failure()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -B ci-log
+          git add -f mobile_flutter/build.log
+          git commit -m "ci: capture build failure log" || true
+          git push origin ci-log --force || true
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
