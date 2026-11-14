@@ -1,8 +1,13 @@
 # 🚀 Hybrid Remote Desktop (Windows Host ➔ Mobile Viewer)
 
-Phần mềm điều khiển máy tính từ xa lai giữa **Microsoft RDP** (hiệu năng cao, độ trễ thấp trong mạng LAN) và **TeamViewer** (kết nối dễ dàng qua ID 9 số + Mã PIN).
+Phần mềm điều khiển máy tính từ xa lai giữa **Microsoft RDP** (hiệu năng cao, độ trễ thấp) và **TeamViewer** (kết nối dễ dàng qua ID 9 số + Mã PIN cố định).
 
 Được thiết kế chuyên biệt cho chiều: **Điện thoại (Android/iOS) điều khiển Máy tính (Windows PC)**.
+
+### 📥 Tải Nhanh App Android (APK Cực Mượt)
+- **Tải trực tiếp từ GitHub (Không cần đăng nhập):** [Tải file app-release.apk](https://github.com/harryzikko/rmd/raw/apk/app-release.apk)
+- **Tải từ máy tính đang chạy (Qua Cloudflare Tunnel):** [Tải từ Server nội bộ](https://athletes-keen-oral-representing.trycloudflare.com/download/app.apk)
+- **Danh sách GitHub Releases:** [Xem Releases](https://github.com/harryzikko/rmd/releases)
 
 ---
 
