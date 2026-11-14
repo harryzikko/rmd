@@ -63,6 +63,19 @@ jobs:
           path: mobile_flutter/build/app/outputs/flutter-apk/app-release.apk
           retention-days: 14
 
+      - name: Push to raw apk branch for direct download
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp mobile_flutter/build/app/outputs/flutter-apk/app-release.apk /tmp/app-release.apk
+          git branch -D apk 2>/dev/null || true
+          git checkout --orphan apk
+          git rm -rf . 2>/dev/null || true
+          cp /tmp/app-release.apk ./app-release.apk
+          git add app-release.apk
+          git commit -m "release: pre-built Hybrid Remote Desktop Android APK" || true
+          git push origin apk --force
+
       - name: Create or Update GitHub Release with APK
         if: startsWith(github.ref, 'refs/tags/v')
         run: |

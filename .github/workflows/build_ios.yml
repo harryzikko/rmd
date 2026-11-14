@@ -1,0 +1,78 @@
+name: Build & Release iOS Unsigned IPA
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build_ios:
+    name: Build iOS Unsigned IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Check Flutter Doctor
+        run: flutter doctor -v
+
+      - name: Install Dependencies
+        working-directory: mobile_flutter
+        run: flutter pub get
+
+      - name: Build iOS App (No Codesign)
+        working-directory: mobile_flutter
+        run: |
+          flutter build ios --release --no-codesign
+
+      - name: Package Unsigned IPA
+        working-directory: mobile_flutter
+        run: |
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/
+          zip -yr HybridRemote-Unsigned.ipa Payload
+          ls -lh HybridRemote-Unsigned.ipa
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HybridRemote-iOS-Unsigned-IPA
+          path: mobile_flutter/HybridRemote-Unsigned.ipa
+          retention-days: 14
+
+      - name: Push to raw ipa branch for direct download
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cp mobile_flutter/HybridRemote-Unsigned.ipa /tmp/HybridRemote-Unsigned.ipa
+          git branch -D ipa 2>/dev/null || true
+          git checkout --orphan ipa
+          git rm -rf . 2>/dev/null || true
+          cp /tmp/HybridRemote-Unsigned.ipa ./HybridRemote-Unsigned.ipa
+          git add HybridRemote-Unsigned.ipa
+          git commit -m "release: pre-built Hybrid Remote Desktop iOS Unsigned IPA" || true
+          git push origin ipa --force
+
+      - name: Attach to GitHub Release (khi push tag v*)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          IPA_PATH="mobile_flutter/HybridRemote-Unsigned.ipa"
+          TAG="${{ github.ref_name }}"
+          echo "Uploading IPA: $IPA_PATH to tag: $TAG"
+          gh release upload "$TAG" "$IPA_PATH" --clobber || \
+          gh release create "$TAG" "$IPA_PATH" \
+            --title "Hybrid Remote Desktop $TAG" \
+            --notes "Bản phát hành Hybrid Remote Desktop $TAG cho iOS (Unsigned IPA)."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

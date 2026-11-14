@@ -34,6 +34,7 @@ class SignalingServer:
         self.app.router.add_post("/api/connect", self._handle_connect)
         self.app.router.add_get("/ws/stream", self._handle_ws_stream)
         self.app.router.add_get("/download/app.apk", self._handle_download_apk)
+        self.app.router.add_get("/download/app.ipa", self._handle_download_ipa)
         self.app.router.add_get("/favicon.ico", self._handle_favicon)
         self.app.router.add_get("/", self._handle_index)
         self.app.router.add_get("/index.html", self._handle_index)
@@ -54,6 +55,22 @@ class SignalingServer:
                 }
             )
         return web.Response(text="APK đang được biên dịch hoặc không tìm thấy.", status=404)
+
+    async def _handle_download_ipa(self, request):
+        ipa_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "mobile_flutter", "HybridRemote-Unsigned.ipa"
+        )
+        if os.path.exists(ipa_path):
+            return web.FileResponse(
+                ipa_path,
+                headers={
+                    "Content-Disposition": 'attachment; filename="HybridRemote-Unsigned.ipa"',
+                    "Content-Type": "application/octet-stream"
+                }
+            )
+        # Chuyển hướng tới link tải trực tiếp trên GitHub raw
+        raise web.HTTPFound("https://github.com/harryzikko/rmd/raw/ipa/HybridRemote-Unsigned.ipa")
 
     async def _handle_favicon(self, request):
         return web.Response(status=204)
