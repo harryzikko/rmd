@@ -44,11 +44,30 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
   Future<String?> _resolveHostUrl(String hostId) async {
     final cleanId = hostId.replaceAll(' ', '');
+
+    // 1. Primary fast check via keyvalue.immanuel.co (super-fast, 0 auth)
+    try {
+      final kvRes = await http
+          .get(Uri.parse('https://keyvalue.immanuel.co/api/KeyVal/GetValue/hybridremote_registry/$cleanId'))
+          .timeout(const Duration(seconds: 3));
+      if (kvRes.statusCode == 200 && kvRes.body.trim().isNotEmpty) {
+        final val = kvRes.body.replaceAll('"', '').trim();
+        if (val.isNotEmpty && val != 'null') {
+          if (val.startsWith('http://') || val.startsWith('https://')) {
+            return val;
+          } else {
+            return 'https://$val.trycloudflare.com';
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 2. Fallback check via ntfy.sh
     final topic = 'hybrid-remote-registry-$cleanId';
     try {
       final res = await http
           .get(Uri.parse('https://ntfy.sh/$topic/raw?poll=1'))
-          .timeout(const Duration(seconds: 4));
+          .timeout(const Duration(seconds: 3));
 
       if (res.statusCode == 200 && res.body.trim().isNotEmpty) {
         final lines = res.body

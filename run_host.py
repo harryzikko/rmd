@@ -114,8 +114,9 @@ def start_cloudflared_tunnel(local_port=8000):
 
 def start_rendezvous_heartbeat(clean_id, tunnel_url, lan_url):
     """
-    Publishes current host connection URL to discovery registry (ntfy.sh)
-    every 60s so mobile phones can connect by 9-digit ID with 0 configuration.
+    Publishes current host connection URL to discovery registries
+    (keyvalue.immanuel.co primary + ntfy.sh fallback) every 30s so
+    mobile phones can connect by 9-digit ID with 0 configuration.
     """
     topic = f"hybrid-remote-registry-{clean_id}"
     payload = json.dumps({
@@ -125,8 +126,21 @@ def start_rendezvous_heartbeat(clean_id, tunnel_url, lan_url):
         "updated_at": int(time.time()),
     }).encode("utf-8")
 
+    m = re.search(r"https://([a-zA-Z0-9-]+)\.trycloudflare\.com", tunnel_url)
+    subdomain = m.group(1) if m else ""
+
     def publish_loop():
         while True:
+            # 1. Primary: keyvalue.immanuel.co (super fast, no auth, no 429)
+            if subdomain:
+                try:
+                    kv_url = f"https://keyvalue.immanuel.co/api/KeyVal/UpdateValue/hybridremote_registry/{clean_id}/{subdomain}"
+                    req = urllib.request.Request(kv_url, method="POST")
+                    urllib.request.urlopen(req, timeout=5)
+                except Exception as e:
+                    logger.debug(f"KV discovery heartbeat warning: {e}")
+
+            # 2. Secondary: ntfy.sh (fallback)
             try:
                 req = urllib.request.Request(
                     f"https://ntfy.sh/{topic}/publish",
@@ -136,7 +150,8 @@ def start_rendezvous_heartbeat(clean_id, tunnel_url, lan_url):
                 urllib.request.urlopen(req, timeout=5)
             except Exception as e:
                 logger.debug(f"Discovery heartbeat warning: {e}")
-            time.sleep(60)
+
+            time.sleep(30)
 
     t = threading.Thread(target=publish_loop, daemon=True)
     t.start()
